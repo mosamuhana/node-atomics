@@ -19,9 +19,9 @@ synchronized across worker threads
 ## Import:
 import:
 ```javascript
-const { WorkerPool, startWorker } = require('@devteks/node-atomics');
+const { AtomicInt32, AtomicLock } = require('@devteks/node-atomics');
 // OR
-import { WorkerPool, startWorker } from '@devteks/node-atomics';
+import { AtomicInt32, AtomicLock } from '@devteks/node-atomics';
 ```
 
 ## Usage
