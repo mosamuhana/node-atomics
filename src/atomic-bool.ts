@@ -1,4 +1,4 @@
-import { lock, unlock, synchronize, DATA_INDEX } from './lock-utils';
+import { lock, unlock, DATA_INDEX } from './lock-utils';
 
 export interface IBoolEditor {
 	get value(): boolean;
@@ -70,10 +70,22 @@ export class AtomicBool {
 		return this.#synchronize(() => this.#setValue(!this.#getValue()));
 	}
 
-	synchronize<T>(fn: (editor: IBoolEditor) => T): T;
-	synchronize<T>(fn: (editor: IBoolEditor) => Promise<T>): Promise<T>;
-	synchronize(fn: (editor: IBoolEditor) => any) {
-		return synchronize(this.#array, () => fn(this.#editor));
+	synchronize<T>(fn: (editor: IBoolEditor) => T) {
+		this.lock();
+		try {
+			return fn(this.#editor);
+		} finally {
+			this.unlock();
+		}
+	}
+
+	async asynchronize<T>(fn: (editor: IBoolEditor) => Promise<T>) {
+		this.lock();
+		try {
+			return await fn(this.#editor);
+		} finally {
+			this.unlock();
+		}
 	}
 
 	lock(): void {

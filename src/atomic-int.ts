@@ -1,4 +1,4 @@
-import { lock, unlock, synchronize, DATA_INDEX } from './lock-utils';
+import { lock, unlock, DATA_INDEX } from './lock-utils';
 
 export interface IEditor {
 	get value(): number;
@@ -30,7 +30,9 @@ abstract class AtomicInt {
 
 		this.#editor = Object.defineProperty({} as IEditor, 'value', {
 			get: (): number => this.#array[DATA_INDEX],
+			//get: (): number => Atomics.load(this.#array, DATA_INDEX) as unknown as number,
 			set: (value: number) => this.#array[DATA_INDEX] = value,
+			//set: (value: number) => {Atomics.store(this.#array, DATA_INDEX, value);},
 		});
 	}
 
@@ -68,10 +70,22 @@ abstract class AtomicInt {
 		return this.#synchronize<number>(() => (this.#array[DATA_INDEX] -= value, this.#array[DATA_INDEX]));
 	}
 
-	synchronize<T>(fn: (editor: IEditor) => T): T;
-	synchronize<T>(fn: (editor: IEditor) => Promise<T>): Promise<T>;
-	synchronize(fn: (editor: IEditor) => any) {
-		return synchronize(this.#array, () => fn(this.#editor));
+	synchronize<T>(fn: (editor: IEditor) => T) {
+		this.lock();
+		try {
+			return fn(this.#editor);
+		} finally {
+			this.unlock();
+		}
+	}
+
+	async asynchronize<T>(fn: (editor: IEditor) => Promise<T>) {
+		this.lock();
+		try {
+			return await fn(this.#editor);
+		} finally {
+			this.unlock();
+		}
 	}
 
 	lock(): void {

@@ -28,7 +28,7 @@ const fixDefinition = content => {
 async function updateScript(file) {
     const content = await readScript(file);
     const newContent = cleanBy(content,
-        cleanComments,
+        //cleanComments,
         cleanEmptyLines,
         addBanner,
     );

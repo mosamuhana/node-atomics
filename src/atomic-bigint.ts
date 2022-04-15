@@ -1,4 +1,4 @@
-import { lock64, unlock64, synchronize64, DATA_INDEX } from './lock-utils';
+import { lock64, unlock64, DATA_INDEX } from './lock-utils';
 
 export interface IEditor64 {
 	get value(): bigint;
@@ -66,10 +66,22 @@ abstract class AtomicBigInt {
 		return this.#synchronize<bigint>(() => (this.#array[DATA_INDEX] -= value, this.#array[DATA_INDEX]));
 	}
 
-	synchronize<T>(fn: (editor: IEditor64) => T): T;
-	synchronize<T>(fn: (editor: IEditor64) => Promise<T>): Promise<T>;
-	synchronize(fn: (editor: IEditor64) => any) {
-		return synchronize64(this.#array, () => fn(this.#editor));
+	synchronize<T>(fn: (editor: IEditor64) => T) {
+		this.lock();
+		try {
+			return fn(this.#editor);
+		} finally {
+			this.unlock();
+		}
+	}
+
+	async asynchronize<T>(fn: (editor: IEditor64) => Promise<T>) {
+		this.lock();
+		try {
+			return await fn(this.#editor);
+		} finally {
+			this.unlock();
+		}
 	}
 
 	lock(): void {

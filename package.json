@@ -1,6 +1,6 @@
 {
   "name": "@devteks/node-atomics",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Node.js Atomic thread safe integers",
   "repository": {
     "type": "git",

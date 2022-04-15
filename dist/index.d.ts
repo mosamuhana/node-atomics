@@ -10,7 +10,7 @@ export class AtomicLock {
 	lock(): void;
 	unlock(): void;
 	synchronize<T>(fn: () => T): T;
-	synchronize<T>(fn: () => Promise<T>): Promise<T>;
+	asynchronize<T>(fn: () => Promise<T>): Promise<T>;
 }
 export interface IEditor {
 	get value(): number;
@@ -33,7 +33,7 @@ declare abstract class AtomicInt {
 	add(value: number): number;
 	sub(value: number): number;
 	synchronize<T>(fn: (editor: IEditor) => T): T;
-	synchronize<T>(fn: (editor: IEditor) => Promise<T>): Promise<T>;
+	asynchronize<T>(fn: (editor: IEditor) => Promise<T>): Promise<T>;
 	lock(): void;
 	unlock(): void;
 }
@@ -97,7 +97,7 @@ declare abstract class AtomicBigInt {
 	add(value: bigint): bigint;
 	sub(value: bigint): bigint;
 	synchronize<T>(fn: (editor: IEditor64) => T): T;
-	synchronize<T>(fn: (editor: IEditor64) => Promise<T>): Promise<T>;
+	asynchronize<T>(fn: (editor: IEditor64) => Promise<T>): Promise<T>;
 	lock(): void;
 	unlock(): void;
 }
@@ -114,5 +114,70 @@ export class AtomicBigUint64 extends AtomicBigInt {
 	static get MIN(): bigint;
 	static get MAX(): bigint;
 	constructor(input?: BigUint64Array | SharedArrayBuffer | number);
+}
+export interface IBoolEditor {
+	get value(): boolean;
+	set value(value: boolean);
+	not(): boolean;
+}
+export class AtomicBool {
+	#private;
+	constructor(input?: Int8Array | SharedArrayBuffer | boolean);
+	get [Symbol.toStringTag](): string;
+	get name(): string;
+	get buffer(): SharedArrayBuffer;
+	/**
+	 * Lock free value editor
+	 */
+	get $(): IBoolEditor;
+	get value(): boolean;
+	set value(val: boolean);
+	not(): boolean;
+	synchronize<T>(fn: (editor: IBoolEditor) => T): T;
+	asynchronize<T>(fn: (editor: IBoolEditor) => Promise<T>): Promise<T>;
+	lock(): void;
+	unlock(): void;
+}
+/**
+ * Semaaphore implementation class.
+ */
+export class Semaphore {
+	#private;
+	/**
+	 * Create Semaphore instance from existing SharedArrayBuffer.
+	 * @param {SharedArrayBuffer} buffer Constructed SharedArrayBuffer.
+	 * @param {number} count The number which allowed to enter critical section.
+	 * @returns {Semaphore}
+	 */
+	static from(buffer: SharedArrayBuffer | Int32Array): Semaphore;
+	/**
+	 * construct Semaphore.
+	 * If `buffer` is passed, this semaphore constructed from that SharedArrayBuffer or Int32Array.
+	 * @param {number} count Number of allowed to enter critical section.
+	 * @param {SharedArrayBuffer} buffer Optional SharedArrayBuffer or Int32Array.
+	 */
+	constructor(count: number, buffer?: SharedArrayBuffer | Int32Array);
+	/**
+	 * Return SharedArrayBuffer.
+	 * This method often used in main thread.
+	 * @returns {SharedArrayBuffer}
+	 * @example
+	 *
+	 * const worker = new Worker('...');
+	 * const semaphore = new Semaphore();
+	 * worker.postMessage({ shared: semaphore.buffer });
+	 */
+	get buffer(): SharedArrayBuffer;
+	/**
+	 * Release occupied section.
+	 */
+	signal(): void;
+	acquire(): void;
+	synchronize<T>(fn: () => T): T;
+	asynchronize<T>(fn: () => Promise<T>): Promise<T>;
+}
+export class Mutex extends Semaphore {
+	constructor(buffer?: SharedArrayBuffer | Int32Array);
+	static from(buffer: SharedArrayBuffer | Int32Array): Mutex;
 }
 export function sleep(ms: number): void;

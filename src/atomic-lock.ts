@@ -1,23 +1,11 @@
-import { lock, unlock, synchronize } from './lock-utils';
+import { lock, unlock } from './lock-utils';
+import { toTypedArray } from './utils';
 
 export class AtomicLock {
 	#array: Int32Array;
 
 	constructor(array?: Int32Array | SharedArrayBuffer) {
-		if (array == null) {
-			this.#array = new Int32Array(new SharedArrayBuffer(4));
-		} else {
-			if (array instanceof SharedArrayBuffer) {
-				if (array.byteLength !== 4) {
-					throw new Error('SharedArrayBuffer must be 4 bytes long');
-				}
-				this.#array = new Int32Array(array);
-			} else if (array instanceof Int32Array) {
-				this.#array = array;
-			} else {
-				throw new Error('Invalid lock buffer');
-			}
-		}
+		this.#array = toTypedArray<Int32Array>(Int32Array, array) ?? new Int32Array(new SharedArrayBuffer(4));
 	}
 
 	get buffer() {
@@ -32,9 +20,21 @@ export class AtomicLock {
 		unlock(this.#array);
 	}
 
-	synchronize<T>(fn: () => T): T;
-	synchronize<T>(fn: () => Promise<T>): Promise<T>;
-	synchronize(fn: () => any) {
-		return synchronize(this.#array, fn);
+	synchronize<T>(fn: () => T): T {
+		this.lock();
+		try {
+			return fn();
+		} finally {
+			this.unlock();
+		}
+	}
+
+	async asynchronize<T>(fn: () => Promise<T>): Promise<T> {
+		this.lock();
+		try {
+			return await fn();
+		} finally {
+			this.unlock();
+		}
 	}
 }
