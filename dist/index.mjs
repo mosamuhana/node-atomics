@@ -1,8 +1,12 @@
 /**
-* @author Mosa Muhana <mosamuhana@gmail.com>
-* https://github.com/mosamuhana
-* See LICENSE file in root directory for full license.
-*/
+ * @devteks/node-atomics
+ * Node.js Atomic thread safe tools
+ * Version: 0.0.3
+ * Author: Mosa Muhana (https://github.com/mosamuhana)
+ * License: MIT
+ * Homepage: https://github.com/mosamuhana/node-atomics#readme
+ */
+
 const UNLOCKED64 = 0n;
 const LOCKED64 = 1n;
 const UNLOCKED = 0;
@@ -10,52 +14,108 @@ const LOCKED = 1;
 const DATA_INDEX = 1;
 function lock(arr) {
     while (true) {
-        if (Atomics.compareExchange(arr, 0, UNLOCKED, LOCKED) !== LOCKED)
+        if (Atomics.compareExchange(arr, 0, UNLOCKED, LOCKED) === UNLOCKED)
             return;
         Atomics.wait(arr, 0, LOCKED);
     }
 }
 function unlock(arr) {
-    Atomics.store(arr, 0, UNLOCKED);
+    if (Atomics.compareExchange(arr, 0, LOCKED, UNLOCKED) !== LOCKED) {
+        throw new Error("Inconsistent state: unlock on unlocked Mutex.");
+    }
     Atomics.notify(arr, 0, 1);
+    //Atomics.store(arr, 0, UNLOCKED);
+    //Atomics.notify(arr, 0, 1);
 }
 function lock64(arr) {
     while (true) {
-        if (Atomics.compareExchange(arr, 0, UNLOCKED64, LOCKED64) !== LOCKED64)
+        if (Atomics.compareExchange(arr, 0, UNLOCKED64, LOCKED64) === UNLOCKED64)
             return;
         Atomics.wait(arr, 0, LOCKED64);
     }
 }
 function unlock64(arr) {
-    Atomics.store(arr, 0, UNLOCKED64);
+    if (Atomics.compareExchange(arr, 0, LOCKED64, UNLOCKED64) !== LOCKED64) {
+        throw new Error("Inconsistent state: unlock on unlocked Mutex.");
+    }
     Atomics.notify(arr, 0, 1);
 }
-function toTypedArray(Type, arr) {
-    if (arr != null) {
-        const bytes = Type.BYTES_PER_ELEMENT;
-        const name = Type.name;
-        if (arr instanceof SharedArrayBuffer) {
-            if (arr.byteLength % bytes !== 0) {
-                throw new Error(`SharedArrayBuffer must be a multiple of ${name}.BYTES_PER_ELEMENT ${bytes} bytes long`);
-            }
-            return new Type(arr);
+function synchronize(arr, fn) {
+    try {
+        lock(arr);
+        return fn();
+    }
+    finally {
+        unlock(arr);
+    }
+}
+function synchronize64(arr, fn) {
+    try {
+        lock64(arr);
+        return fn();
+    }
+    finally {
+        unlock64(arr);
+    }
+}
+async function asynchronize(arr, fn) {
+    lock(arr);
+    try {
+        return await fn();
+    }
+    finally {
+        unlock(arr);
+    }
+}
+async function asynchronize64(arr, fn) {
+    lock64(arr);
+    try {
+        return await fn();
+    }
+    finally {
+        unlock64(arr);
+    }
+}
+const bool2int = (v) => !!v ? 1 : 0;
+const int2bool = (v) => v !== 0;
+function createEditor(arr) {
+    return Object.freeze({
+        get value() { return arr[DATA_INDEX]; },
+        set value(v) { arr[DATA_INDEX] = v; }
+    });
+}
+function createBoolEditor(arr) {
+    return Object.freeze({
+        get value() { return int2bool(arr[DATA_INDEX]); },
+        set value(v) { arr[DATA_INDEX] = bool2int(v); },
+        not: () => int2bool(arr[DATA_INDEX] = arr[DATA_INDEX] !== 0 ? 0 : 1)
+    });
+}
+
+class Mutex {
+    static from(buffer) {
+        return new Mutex(buffer);
+    }
+    #array;
+    constructor(input) {
+        if (input == null) {
+            this.#array = new Int32Array(new SharedArrayBuffer(4));
         }
-        else if (arr instanceof Type) {
-            if (!(arr.buffer instanceof SharedArrayBuffer)) {
-                throw new Error('Invalid typed array buffer, must be instanceof SharedArrayBuffer');
+        else if (input instanceof SharedArrayBuffer) {
+            if (input.byteLength != 4) {
+                throw new Error("Mutex buffer must be 4 bytes.");
             }
-            return arr;
+            this.#array = new Int32Array(input);
+        }
+        else if (input instanceof Int32Array) {
+            if (input.length != 1) {
+                throw new Error("Mutex buffer must be 4 bytes.");
+            }
+            this.#array = input;
         }
         else {
-            throw new Error(`Invalid parameter, must be SharedArrayBuffer or ${name}`);
+            throw new Error(`Invalid parameter type`);
         }
-    }
-    return undefined;
-}
-class AtomicLock {
-    #array;
-    constructor(array) {
-        this.#array = toTypedArray(Int32Array, array) ?? new Int32Array(new SharedArrayBuffer(4));
     }
     get buffer() {
         return this.#array.buffer;
@@ -85,406 +145,39 @@ class AtomicLock {
         }
     }
 }
-class AtomicInt {
-    #name;
-    #array;
-    #editor;
-    constructor(Type, input) {
-        if (input instanceof Type) {
-            if (!(input.buffer instanceof SharedArrayBuffer)) {
-                throw new Error(`${Type.name} buffer not SharedArrayBuffer`);
-            }
-            this.#array = input;
-        }
-        else if (input instanceof SharedArrayBuffer) {
-            this.#array = new Type(input);
-        }
-        else {
-            this.#array = new Type(new SharedArrayBuffer(Type.BYTES_PER_ELEMENT * 2));
-        }
-        this.#name = 'Atomic' + Type.name.replace('Array', '');
-        if (typeof input === 'number') {
-            Atomics.store(this.#array, DATA_INDEX, input);
-        }
-        this.#editor = Object.defineProperty({}, 'value', {
-            get: () => this.#array[DATA_INDEX],
-            //get: (): number => Atomics.load(this.#array, DATA_INDEX) as unknown as number,
-            set: (value) => this.#array[DATA_INDEX] = value,
-            //set: (value: number) => {Atomics.store(this.#array, DATA_INDEX, value);},
-        });
-    }
-    get [Symbol.toStringTag]() { return this.name; }
-    get name() { return this.#name; }
-    get buffer() { return this.#array.buffer; }
-    /**
-     * Lock free value editor
-     */
-    get $() { return this.#editor; }
-    get value() {
-        return this.#synchronize(() => this.#array[DATA_INDEX]);
-    }
-    set value(val) {
-        this.#synchronize(() => this.#array[DATA_INDEX] = val);
-    }
-    increment() {
-        return this.#synchronize(() => ++this.#array[DATA_INDEX]);
-    }
-    decrement() {
-        return this.#synchronize(() => --this.#array[DATA_INDEX]);
-    }
-    add(value) {
-        return this.#synchronize(() => (this.#array[DATA_INDEX] += value, this.#array[DATA_INDEX]));
-    }
-    sub(value) {
-        return this.#synchronize(() => (this.#array[DATA_INDEX] -= value, this.#array[DATA_INDEX]));
-    }
-    synchronize(fn) {
-        this.lock();
-        try {
-            return fn(this.#editor);
-        }
-        finally {
-            this.unlock();
-        }
-    }
-    async asynchronize(fn) {
-        this.lock();
-        try {
-            return await fn(this.#editor);
-        }
-        finally {
-            this.unlock();
-        }
-    }
-    lock() {
-        lock(this.#array);
-    }
-    unlock() {
-        unlock(this.#array);
-    }
-    #synchronize(fn) {
-        try {
-            this.lock();
-            return fn();
-        }
-        finally {
-            this.unlock();
-        }
-    }
-}
-class AtomicInt8 extends AtomicInt {
-    static get BYTE_SIZE() { return 1; }
-    static get UNSIGNED() { return false; }
-    static get MIN() { return -128; }
-    static get MAX() { return 127; }
-    constructor(input) {
-        super(Int8Array, input);
-    }
-}
-class AtomicInt16 extends AtomicInt {
-    static get BYTE_SIZE() { return 2; }
-    static get UNSIGNED() { return false; }
-    static get MIN() { return -32768; }
-    static get MAX() { return 32767; }
-    constructor(input) {
-        super(Int16Array, input);
-    }
-}
-class AtomicInt32 extends AtomicInt {
-    static get BYTE_SIZE() { return 4; }
-    static get UNSIGNED() { return false; }
-    static get MIN() { return -2147483648; }
-    static get MAX() { return 2147483647; }
-    constructor(input) {
-        super(Int32Array, input);
-    }
-}
-class AtomicUint8 extends AtomicInt {
-    static get BYTE_SIZE() { return 1; }
-    static get UNSIGNED() { return true; }
-    static get MIN() { return 0; }
-    static get MAX() { return 255; }
-    constructor(input) {
-        super(Uint8Array, input);
-    }
-}
-class AtomicUint16 extends AtomicInt {
-    static get BYTE_SIZE() { return 2; }
-    static get UNSIGNED() { return true; }
-    static get MIN() { return 0; }
-    static get MAX() { return 65535; }
-    constructor(input) {
-        super(Uint16Array, input);
-    }
-}
-class AtomicUint32 extends AtomicInt {
-    static get BYTE_SIZE() { return 4; }
-    static get UNSIGNED() { return true; }
-    static get MIN() { return 0; }
-    static get MAX() { return 4294967295; }
-    constructor(input) {
-        super(Uint32Array, input);
-    }
-}
-class AtomicBigInt {
-    #name;
-    #array;
-    #editor;
-    constructor(Type, input) {
-        if (input instanceof Type) {
-            if (!(input.buffer instanceof SharedArrayBuffer)) {
-                throw new Error(`${Type.name} buffer not SharedArrayBuffer`);
-            }
-            this.#array = input;
-        }
-        else if (input instanceof SharedArrayBuffer) {
-            this.#array = new Type(input);
-        }
-        else {
-            this.#array = new Type(new SharedArrayBuffer(Type.BYTES_PER_ELEMENT * 2));
-        }
-        this.#name = 'Atomic' + Type.name.replace('Array', '');
-        if (typeof input === 'bigint') {
-            Atomics.store(this.#array, DATA_INDEX, input);
-        }
-        else if (typeof input === 'number') {
-            Atomics.store(this.#array, DATA_INDEX, BigInt(input));
-        }
-        this.#editor = Object.defineProperty({}, 'value', {
-            get: () => this.#array[DATA_INDEX],
-            set: (value) => this.#array[DATA_INDEX] = value,
-        });
-    }
-    get [Symbol.toStringTag]() { return this.#name; }
-    get name() { return this.#name; }
-    get buffer() { return this.#array.buffer; }
-    get $() { return this.#editor; }
-    get value() {
-        return this.#synchronize(() => this.#array[DATA_INDEX]);
-    }
-    set value(val) {
-        this.#synchronize(() => this.#array[DATA_INDEX] = val);
-    }
-    increment() {
-        return this.#synchronize(() => ++this.#array[DATA_INDEX]);
-    }
-    decrement() {
-        return this.#synchronize(() => --this.#array[DATA_INDEX]);
-    }
-    add(value) {
-        return this.#synchronize(() => (this.#array[DATA_INDEX] += value, this.#array[DATA_INDEX]));
-    }
-    sub(value) {
-        return this.#synchronize(() => (this.#array[DATA_INDEX] -= value, this.#array[DATA_INDEX]));
-    }
-    synchronize(fn) {
-        this.lock();
-        try {
-            return fn(this.#editor);
-        }
-        finally {
-            this.unlock();
-        }
-    }
-    async asynchronize(fn) {
-        this.lock();
-        try {
-            return await fn(this.#editor);
-        }
-        finally {
-            this.unlock();
-        }
-    }
-    lock() {
-        lock64(this.#array);
-    }
-    unlock() {
-        unlock64(this.#array);
-    }
-    #synchronize(fn) {
-        try {
-            this.lock();
-            return fn();
-        }
-        finally {
-            this.unlock();
-        }
-    }
-}
-class AtomicBigInt64 extends AtomicBigInt {
-    static get BYTE_SIZE() { return 8; }
-    static get UNSIGNED() { return false; }
-    static get MIN() { return -(2n ** 63n); }
-    static get MAX() { return 2n ** 63n - 1n; }
-    constructor(input) {
-        super(BigInt64Array, input);
-    }
-}
-class AtomicBigUint64 extends AtomicBigInt {
-    static get BYTE_SIZE() { return 8; }
-    static get UNSIGNED() { return true; }
-    static get MIN() { return 0n; }
-    static get MAX() { return 2n ** 64n - 1n; }
-    constructor(input) {
-        super(BigUint64Array, input);
-    }
-}
-class AtomicBool {
-    #array;
-    #editor;
-    constructor(input) {
-        if (input == null) {
-            this.#array = new Int8Array(new SharedArrayBuffer(2));
-        }
-        else {
-            if (input instanceof Int8Array) {
-                if (!(input.buffer instanceof SharedArrayBuffer)) {
-                    throw new Error(`buffer not SharedArrayBuffer`);
-                }
-                this.#array = input;
-            }
-            else if (input instanceof SharedArrayBuffer) {
-                this.#array = new Int8Array(input);
-            }
-            else {
-                if (typeof input === 'boolean') {
-                    this.#array = new Int8Array(new SharedArrayBuffer(2));
-                    Atomics.store(this.#array, DATA_INDEX, input ? 1 : 0);
-                }
-                else {
-                    throw new Error(`input must be Int8Array or SharedArrayBuffer or boolean`);
-                }
-            }
-        }
-        this.#editor = {};
-        Object.defineProperty(this.#editor, 'value', {
-            get: () => this.#getValue(),
-            set: (value) => this.#setValue(value),
-        });
-        Object.defineProperty(this.#editor, 'not', {
-            value: () => this.#setValue(!this.#getValue()),
-        });
-    }
-    get [Symbol.toStringTag]() { return this.name; }
-    get name() { return 'AtomicBool'; }
-    get buffer() { return this.#array.buffer; }
-    /**
-     * Lock free value editor
-     */
-    get $() { return this.#editor; }
-    #getValue() { return this.#array[DATA_INDEX] === 1; }
-    #setValue(v) {
-        v = !!v;
-        this.#array[DATA_INDEX] = v ? 1 : 0;
-        return v;
-    }
-    get value() {
-        return this.#synchronize(() => this.#getValue());
-    }
-    set value(val) {
-        this.#synchronize(() => this.#setValue(val));
-    }
-    not() {
-        return this.#synchronize(() => this.#setValue(!this.#getValue()));
-    }
-    synchronize(fn) {
-        this.lock();
-        try {
-            return fn(this.#editor);
-        }
-        finally {
-            this.unlock();
-        }
-    }
-    async asynchronize(fn) {
-        this.lock();
-        try {
-            return await fn(this.#editor);
-        }
-        finally {
-            this.unlock();
-        }
-    }
-    lock() {
-        lock(this.#array);
-    }
-    unlock() {
-        unlock(this.#array);
-    }
-    #synchronize(fn) {
-        try {
-            this.lock();
-            return fn();
-        }
-        finally {
-            this.unlock();
-        }
-    }
-}
-/**
- * Semaaphore implementation class.
- */
+
 class Semaphore {
-    /**
-     * Create Semaphore instance from existing SharedArrayBuffer.
-     * @param {SharedArrayBuffer} buffer Constructed SharedArrayBuffer.
-     * @param {number} count The number which allowed to enter critical section.
-     * @returns {Semaphore}
-     */
     static from(buffer) {
-        let count = 0;
-        if (buffer instanceof Int32Array) {
-            count = buffer.length;
-        }
-        else if (buffer instanceof SharedArrayBuffer) {
-            if (buffer.byteLength % 4 !== 0) {
-                throw new Error('buffer length must be multiple of 4');
-            }
-            count = buffer.byteLength / 4;
-        }
-        else {
-            throw new Error('buffer must be SharedArrayBuffer or Int32Array');
-        }
-        if (count < 1) {
-            throw new Error('buffer length must be greater than 0');
-        }
-        return new Semaphore(count, buffer);
+        return new Semaphore(buffer);
     }
     #count;
     #current;
     #array;
-    /**
-     * construct Semaphore.
-     * If `buffer` is passed, this semaphore constructed from that SharedArrayBuffer or Int32Array.
-     * @param {number} count Number of allowed to enter critical section.
-     * @param {SharedArrayBuffer} buffer Optional SharedArrayBuffer or Int32Array.
-     */
-    constructor(count, buffer) {
-        //const buf = buffer || new SharedArrayBuffer(count % 4 !== 0 ? count * 4 : count);
-        if (buffer == null) {
-            this.#array = new Int32Array(new SharedArrayBuffer(count * 4));
+    constructor(input) {
+        if (typeof input === 'number') {
+            if (!Number.isInteger(input) || input <= 0) {
+                throw new Error("WaitGroup initial value must be an integer greater than zero.");
+            }
+            this.#array = new Int32Array(new SharedArrayBuffer(input * 4));
         }
         else {
-            if (buffer instanceof Int32Array) {
-                if (!(buffer.buffer instanceof SharedArrayBuffer)) {
+            if (input instanceof Int32Array) {
+                if (!(input.buffer instanceof SharedArrayBuffer)) {
                     throw new Error('buffer must be Int32Array with Int32Array.buffer as SharedArrayBuffer');
                 }
-                if (buffer.length !== count) {
-                    throw new Error('buffer length is not equal to count');
-                }
-                this.#array = buffer;
+                this.#array = input;
             }
-            else if (buffer instanceof SharedArrayBuffer) {
-                if ((buffer.byteLength / 4) !== count) {
-                    throw new Error('buffer length is not equal to count');
+            else if (input instanceof SharedArrayBuffer) {
+                if ((input.byteLength % 4) !== 0) {
+                    throw new Error('buffer length must be multiple of 4');
                 }
-                this.#array = new Int32Array(buffer);
+                this.#array = new Int32Array(input);
             }
             else {
                 throw new Error('buffer must be SharedArrayBuffer or Int32Array');
             }
         }
-        this.#count = count;
+        this.#count = this.#array.length;
         this.#current = undefined;
     }
     /**
@@ -541,16 +234,376 @@ class Semaphore {
         }
     }
 }
-class Mutex extends Semaphore {
-    constructor(buffer) {
-        super(1, buffer);
-    }
+
+class WaitGroup {
     static from(buffer) {
-        return new Mutex(buffer);
+        return new WaitGroup(buffer);
+    }
+    #array;
+    constructor(input) {
+        if (input == null) {
+            this.#array = new Int32Array(new SharedArrayBuffer(4));
+        }
+        else if (input instanceof SharedArrayBuffer) {
+            if (input.byteLength != 4) {
+                throw new Error("WaitGroup buffer must be 4 bytes.");
+            }
+            this.#array = new Int32Array(input);
+        }
+        else if (input instanceof Int32Array) {
+            if (input.length != 1) {
+                throw new Error("WaitGroup buffer must be 4 bytes.");
+            }
+            this.#array = input;
+        }
+        else if (typeof input === 'number') {
+            if (!Number.isInteger(input) || input <= 0) {
+                throw new Error("WaitGroup initial value must be an integer greater than zero.");
+            }
+            const array = new Int32Array(new SharedArrayBuffer(4));
+            array[0] = input;
+            this.#array = array;
+        }
+        else {
+            throw new Error(`Invalid type`);
+        }
+    }
+    get buffer() {
+        return this.#array.buffer;
+    }
+    add(n = 1) {
+        const t = typeof n;
+        if (t !== 'number' || !Number.isInteger(n) || n < 1) {
+            throw new Error('WaitGroup must add integer >= 1');
+        }
+        this.#add(n);
+    }
+    done() {
+        this.#add(-1);
+    }
+    wait() {
+        while (true) {
+            let count = Atomics.load(this.#array, 0);
+            if (count == 0)
+                return;
+            if (Atomics.wait(this.#array, 0, count) == "ok")
+                return;
+        }
+    }
+    #add(n) {
+        const current = n + Atomics.add(this.#array, 0, n);
+        if (current < 0) {
+            throw new Error("WaitGroup is in inconsistent state: negative count.");
+        }
+        if (current > 0)
+            return;
+        Atomics.notify(this.#array, 0);
     }
 }
+
+class AtomicInt {
+    #name;
+    #array;
+    #editor;
+    constructor(Type, input) {
+        const size = Type.BYTES_PER_ELEMENT * 2;
+        this.#name = 'Atomic' + Type.name.replace('Array', '');
+        if (input == null) {
+            this.#array = new Type(new SharedArrayBuffer(size));
+        }
+        else if (input instanceof SharedArrayBuffer) {
+            if (input.byteLength != size) {
+                throw new Error(`${this.#name} buffer must be ${size} bytes.`);
+            }
+            this.#array = new Type(input);
+        }
+        else if (input instanceof Type) {
+            if (input.length != 2) {
+                throw new Error(`${this.#name} array must be 2 items.`);
+            }
+            this.#array = input;
+        }
+        else if (typeof input === 'number') {
+            if (isNaN(input) || !Number.isInteger(input)) {
+                throw new Error(`${this.#name} initial value must be an integer.`);
+            }
+            this.#array = new Type(new SharedArrayBuffer(size));
+            this.#array[0] = input;
+        }
+        else {
+            throw new Error(`Invalid parameter type.`);
+        }
+        this.#editor = createEditor(this.#array);
+    }
+    get [Symbol.toStringTag]() { return this.name; }
+    get name() { return this.#name; }
+    get buffer() { return this.#array.buffer; }
+    /**
+     * Lock free value editor
+     */
+    get $() { return this.#editor; }
+    get value() {
+        return synchronize(this.#array, () => this.#array[DATA_INDEX]);
+    }
+    set value(val) {
+        synchronize(this.#array, () => this.#array[DATA_INDEX] = val);
+    }
+    increment() {
+        return synchronize(this.#array, () => ++this.#array[DATA_INDEX]);
+    }
+    decrement() {
+        return synchronize(this.#array, () => --this.#array[DATA_INDEX]);
+    }
+    add(value) {
+        return synchronize(this.#array, () => (this.#array[DATA_INDEX] += value, this.#array[DATA_INDEX]));
+    }
+    sub(value) {
+        return synchronize(this.#array, () => (this.#array[DATA_INDEX] -= value, this.#array[DATA_INDEX]));
+    }
+    synchronize(fn) {
+        return synchronize(this.#array, () => fn(this.#editor));
+    }
+    lock() {
+        lock(this.#array);
+    }
+    unlock() {
+        unlock(this.#array);
+    }
+    async asynchronize(fn) {
+        return await asynchronize(this.#array, () => fn(this.#editor));
+    }
+}
+class AtomicInt8 extends AtomicInt {
+    static get BYTE_SIZE() { return 1; }
+    static get UNSIGNED() { return false; }
+    static get MIN() { return -128; }
+    static get MAX() { return 127; }
+    static from(input) {
+        return new AtomicInt8(input);
+    }
+    constructor(input) {
+        super(Int8Array, input);
+    }
+}
+class AtomicInt16 extends AtomicInt {
+    static get BYTE_SIZE() { return 2; }
+    static get UNSIGNED() { return false; }
+    static get MIN() { return -32768; }
+    static get MAX() { return 32767; }
+    static from(input) {
+        return new AtomicInt16(input);
+    }
+    constructor(input) {
+        super(Int16Array, input);
+    }
+}
+class AtomicInt32 extends AtomicInt {
+    static get BYTE_SIZE() { return 4; }
+    static get UNSIGNED() { return false; }
+    static get MIN() { return -2147483648; }
+    static get MAX() { return 2147483647; }
+    static from(input) {
+        return new AtomicInt32(input);
+    }
+    constructor(input) {
+        super(Int32Array, input);
+    }
+}
+class AtomicUint8 extends AtomicInt {
+    static get BYTE_SIZE() { return 1; }
+    static get UNSIGNED() { return true; }
+    static get MIN() { return 0; }
+    static get MAX() { return 255; }
+    static from(input) {
+        return new AtomicUint8(input);
+    }
+    constructor(input) {
+        super(Uint8Array, input);
+    }
+}
+class AtomicUint16 extends AtomicInt {
+    static get BYTE_SIZE() { return 2; }
+    static get UNSIGNED() { return true; }
+    static get MIN() { return 0; }
+    static get MAX() { return 65535; }
+    static from(input) {
+        return new AtomicUint16(input);
+    }
+    constructor(input) {
+        super(Uint16Array, input);
+    }
+}
+class AtomicUint32 extends AtomicInt {
+    static get BYTE_SIZE() { return 4; }
+    static get UNSIGNED() { return true; }
+    static get MIN() { return 0; }
+    static get MAX() { return 4294967295; }
+    static from(input) {
+        return new AtomicUint32(input);
+    }
+    constructor(input) {
+        super(Uint32Array, input);
+    }
+}
+
+class AtomicBigInt {
+    #name;
+    #array;
+    #editor;
+    constructor(Type, input) {
+        const size = 16;
+        this.#name = 'Atomic' + Type.name.replace('Array', '');
+        if (input == null) {
+            this.#array = new Type(new SharedArrayBuffer(size));
+        }
+        else if (input instanceof SharedArrayBuffer) {
+            if (input.byteLength != size) {
+                throw new Error(`${this.#name} buffer must be ${size} bytes.`);
+            }
+            this.#array = new Type(input);
+        }
+        else if (input instanceof Type) {
+            if (input.length != 2) {
+                throw new Error(`${this.#name} array must be 2 items.`);
+            }
+            this.#array = input;
+        }
+        else if (typeof input === 'bigint') {
+            this.#array = new Type(new SharedArrayBuffer(size));
+            this.#array[DATA_INDEX] = input;
+        }
+        else if (typeof input === 'number') {
+            if (isNaN(input) || !Number.isInteger(input)) {
+                throw new Error(`${this.#name} initial value must be an integer.`);
+            }
+            this.#array = new Type(new SharedArrayBuffer(size));
+            this.#array[DATA_INDEX] = BigInt(input);
+        }
+        else {
+            throw new Error(`Invalid parameter type.`);
+        }
+        this.#editor = createEditor(this.#array);
+    }
+    get [Symbol.toStringTag]() { return this.#name; }
+    get name() { return this.#name; }
+    get buffer() { return this.#array.buffer; }
+    get $() { return this.#editor; }
+    get value() {
+        return synchronize64(this.#array, () => this.#array[DATA_INDEX]);
+    }
+    set value(val) {
+        synchronize64(this.#array, () => this.#array[DATA_INDEX] = val);
+    }
+    increment() {
+        return synchronize64(this.#array, () => ++this.#array[DATA_INDEX]);
+    }
+    decrement() {
+        return synchronize64(this.#array, () => --this.#array[DATA_INDEX]);
+    }
+    add(value) {
+        return synchronize64(this.#array, () => (this.#array[DATA_INDEX] += value, this.#array[DATA_INDEX]));
+    }
+    sub(value) {
+        return synchronize64(this.#array, () => (this.#array[DATA_INDEX] -= value, this.#array[DATA_INDEX]));
+    }
+    synchronize(fn) {
+        return synchronize64(this.#array, () => fn(this.#editor));
+    }
+    async asynchronize(fn) {
+        return await asynchronize64(this.#array, () => fn(this.#editor));
+    }
+    lock() {
+        lock64(this.#array);
+    }
+    unlock() {
+        unlock64(this.#array);
+    }
+}
+class AtomicBigInt64 extends AtomicBigInt {
+    static get BYTE_SIZE() { return 8; }
+    static get UNSIGNED() { return false; }
+    static get MIN() { return -(2n ** 63n); }
+    static get MAX() { return 2n ** 63n - 1n; }
+    static from(input) {
+        return new AtomicBigInt64(input);
+    }
+    constructor(input) {
+        super(BigInt64Array, input);
+    }
+}
+class AtomicBigUint64 extends AtomicBigInt {
+    static get BYTE_SIZE() { return 8; }
+    static get UNSIGNED() { return true; }
+    static get MIN() { return 0n; }
+    static get MAX() { return 2n ** 64n - 1n; }
+    static from(input) {
+        return new AtomicBigUint64(input);
+    }
+    constructor(input) {
+        super(BigUint64Array, input);
+    }
+}
+
+class AtomicBool {
+    #array;
+    #editor;
+    constructor(input) {
+        if (input == null) {
+            this.#array = new Int32Array(new SharedArrayBuffer(8));
+        }
+        else if (input instanceof SharedArrayBuffer) {
+            if (input.byteLength != 8) {
+                throw new Error(`AtomicBool buffer must be 8 bytes.`);
+            }
+            this.#array = new Int32Array(input);
+        }
+        else if (input instanceof Int32Array) {
+            if (input.length != 2) {
+                throw new Error(`AtomicBool array must be 2 items.`);
+            }
+            this.#array = input;
+        }
+        else if (typeof input === 'boolean') {
+            this.#array = new Int32Array(new SharedArrayBuffer(8));
+            this.#array[0] = bool2int(input);
+        }
+        else {
+            throw new Error(`Invalid parameter type.`);
+        }
+        this.#editor = createBoolEditor(this.#array);
+    }
+    get [Symbol.toStringTag]() { return this.name; }
+    get name() { return 'AtomicBool'; }
+    get buffer() { return this.#array.buffer; }
+    /**
+     * Lock free value editor
+     */
+    get $() { return this.#editor; }
+    get value() {
+        return synchronize(this.#array, () => this.#editor.value);
+    }
+    set value(v) {
+        synchronize(this.#array, () => this.#editor.value = v);
+    }
+    not() {
+        return synchronize(this.#array, () => this.#editor.not());
+    }
+    synchronize(fn) {
+        return synchronize(this.#array, () => fn(this.#editor));
+    }
+    async asynchronize(fn) {
+        return await asynchronize(this.#array, () => fn(this.#editor));
+    }
+    lock() {
+        lock(this.#array);
+    }
+    unlock() {
+        unlock(this.#array);
+    }
+}
+
 function sleep(ms) {
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
-export { AtomicBigInt64, AtomicBigUint64, AtomicBool, AtomicInt16, AtomicInt32, AtomicInt8, AtomicLock, AtomicUint16, AtomicUint32, AtomicUint8, Mutex, Semaphore, sleep };
-//# sourceMappingURL=index.mjs.map
+
+export { AtomicBigInt64, AtomicBigUint64, AtomicBool, AtomicInt16, AtomicInt32, AtomicInt8, AtomicUint16, AtomicUint32, AtomicUint8, Mutex, Semaphore, WaitGroup, sleep };

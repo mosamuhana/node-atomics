@@ -25,7 +25,7 @@ async function mainThread() {
 
 async function workerThread() {
   const id = workerData.id;
-  const int = new AtomicInt32(workerData.data);
+  const int = AtomicInt32.from(workerData.data);
   //console.log(`Thread ${id} started`, arr[0]);
   const v = await int.asynchronize(async (e) => {
     await setTimeout(100);

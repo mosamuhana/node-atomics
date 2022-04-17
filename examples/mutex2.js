@@ -1,5 +1,5 @@
 const { isMainThread, workerData, threadId, Worker } = require('worker_threads');
-const { setTimeout } = require('timers/promises');
+const delay = require('timers/promises').setTimeout;
 
 const { Mutex } = require('../');
 
@@ -20,37 +20,28 @@ async function mainThread() {
   }
   await Promise.all( Array(5).fill(null).map((_, id) => runTask(id)) );
 
-  //await setTimeout(1000);
+  //await delay(1000);
   console.log('RESULT:', arr[0]);
   console.timeEnd('main');
 }
 
 async function workerThread() {
   const id = workerData.id;
-  const mutex = new Mutex(workerData.mutex);
+  const mutex = Mutex.from(workerData.mutex);
   const arr = new Int32Array(workerData.data);
-  const run = async () => {
-    const v = await mutex.asynchronize(async () => {
-      await setTimeout(100);
-      for (let i = 0; i < 1000; i++) {
-        arr[0]++;
-      }
-      return arr[0];
-    });
-    console.log(`Thread ${id} ended`, v);
-  };
-  const run2 = async () => {
-    mutex.acquire();
-    await setTimeout(100);
+
+  let v = 0;
+  mutex.lock();
+  try {
+    await delay(100);
     for (let i = 0; i < 1000; i++) {
       arr[0]++;
     }
-    const v = arr[0];
-    mutex.signal();
-    console.log(`Thread ${id} ended`, v);
-  };
-  
-  await run();
+    v = arr[0];
+  } finally {
+    mutex.unlock();
+  }
+  console.log(`Thread ${id} ended`, v);
 }
 
 if (isMainThread) {

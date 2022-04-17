@@ -1,8 +1,5 @@
-import { LOCKED, UNLOCKED } from './lock-utils';
+import { LOCKED, UNLOCKED } from './utils';
 
-/**
- * Semaaphore implementation class.
- */
 export class Semaphore {
   /**
    * Create Semaphore instance from existing SharedArrayBuffer.
@@ -10,22 +7,10 @@ export class Semaphore {
    * @param {number} count The number which allowed to enter critical section.
    * @returns {Semaphore}
    */
-  static from(buffer: SharedArrayBuffer | Int32Array): Semaphore {
-    let count = 0;
-    if (buffer instanceof Int32Array) {
-      count = buffer.length;
-    } else if (buffer instanceof SharedArrayBuffer) {
-      if (buffer.byteLength % 4 !== 0) {
-        throw new Error('buffer length must be multiple of 4');
-      }
-      count = buffer.byteLength / 4;
-    } else {
-      throw new Error('buffer must be SharedArrayBuffer or Int32Array');
-    }
-    if (count < 1) {
-      throw new Error('buffer length must be greater than 0');
-    }
-    return new Semaphore(count, buffer);
+  static from(buffer: SharedArrayBuffer): Semaphore;
+  static from(buffer: Int32Array): Semaphore;
+  static from(buffer: any): Semaphore {
+    return new Semaphore(buffer);
   }
 
   #count: number;
@@ -38,32 +23,34 @@ export class Semaphore {
    * @param {number} count Number of allowed to enter critical section.
    * @param {SharedArrayBuffer} buffer Optional SharedArrayBuffer or Int32Array.
    */
-  constructor(count: number, buffer?: SharedArrayBuffer | Int32Array) {
-    //const buf = buffer || new SharedArrayBuffer(count % 4 !== 0 ? count * 4 : count);
-    if (buffer == null) {
-      this.#array = new Int32Array(new SharedArrayBuffer(count * 4));
-    } else {
-      if (buffer instanceof Int32Array) {
-        if (!(buffer.buffer instanceof SharedArrayBuffer)) {
+	constructor(count: number);
+	constructor(buffer: SharedArrayBuffer);
+	constructor(array: Int32Array);
+  constructor(input: any) {
+		if (typeof input === 'number') {
+			if (!Number.isInteger(input) || input <= 0) {
+				throw new Error("WaitGroup initial value must be an integer greater than zero.");
+			}
+			this.#array = new Int32Array(new SharedArrayBuffer(input * 4));
+		} else {
+      if (input instanceof Int32Array) {
+        if (!(input.buffer instanceof SharedArrayBuffer)) {
           throw new Error('buffer must be Int32Array with Int32Array.buffer as SharedArrayBuffer');
         }
-        if (buffer.length !== count) {
-          throw new Error('buffer length is not equal to count');
+        this.#array = input;
+      } else if (input instanceof SharedArrayBuffer) {
+        if ((input.byteLength % 4) !== 0) {
+          throw new Error('buffer length must be multiple of 4');
         }
-        this.#array = buffer;
-      } else if (buffer instanceof SharedArrayBuffer) {
-        if ((buffer.byteLength / 4) !== count) {
-          throw new Error('buffer length is not equal to count');
-        }
-        this.#array = new Int32Array(buffer);
+        this.#array = new Int32Array(input);
       } else {
         throw new Error('buffer must be SharedArrayBuffer or Int32Array');
       }
-    }
+		}
 
-    this.#count = count;
+		this.#count = this.#array.length;
     this.#current = undefined;
-  }
+	}
 
   /**
    * Return SharedArrayBuffer.
@@ -117,15 +104,5 @@ export class Semaphore {
     } finally {
       this.signal();
     }
-  }
-}
-
-export class Mutex extends Semaphore {
-  constructor(buffer?: SharedArrayBuffer | Int32Array) {
-    super(1, buffer);
-  }
-
-  static from(buffer: SharedArrayBuffer | Int32Array) {
-    return new Mutex(buffer);
   }
 }

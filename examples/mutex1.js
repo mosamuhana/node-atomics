@@ -1,23 +1,16 @@
 const { isMainThread, workerData, threadId, Worker } = require('worker_threads');
-const { AtomicLock } = require('../');
+const delay = require('timers/promises').setTimeout;
 
-function waitWorker(worker) {
-  return new Promise((resolve) => {
-    worker.on('exit', () => {
-      console.log(`Thread ${worker.threadId} exited`);
-      resolve();
-    });
-  });
-}
+const { Mutex } = require('../');
 
 async function mainThread() {
   console.time('main');
-  const lock = new AtomicLock();
+  const mutex = new Mutex();
   const arr = new Int32Array(new SharedArrayBuffer(4));
 
   const runTask = (id) => {
-    const worker = new Worker(__filename, { workerData: { data: arr.buffer, lock: lock.buffer, id } });
     return new Promise((resolve, reject) => {
+      const worker = new Worker(__filename, { workerData: { data: arr.buffer, mutex: mutex.buffer, id } });
       worker.on('exit', () => {
         console.log(`Thread ${id} exited`);
         resolve();
@@ -25,28 +18,27 @@ async function mainThread() {
       worker.on('error', err => reject(err));
     });
   }
-
   await Promise.all( Array(5).fill(null).map((_, id) => runTask(id)) );
 
+  //await delay(1000);
   console.log('RESULT:', arr[0]);
   console.timeEnd('main');
 }
 
 async function workerThread() {
-  const { setTimeout } = require('timers/promises');
-
   const id = workerData.id;
-  const lock = new AtomicLock(workerData.lock);
+  const mutex = Mutex.from(workerData.mutex);
   const arr = new Int32Array(workerData.data);
-  //console.log(`Thread ${id} started`, arr[0]);
-  const v = await lock.asynchronize(async () => {
-    await setTimeout(10);
-    for (let i = 0; i < 1000; i++) {
-      arr[0]++;
-    }
-    return arr[0];
-  });
-  console.log(`Thread ${id} ended`, v);
+
+	const v = await mutex.asynchronize(async () => {
+		await delay(100);
+		for (let i = 0; i < 1000; i++) {
+			arr[0]++;
+		}
+		return arr[0];
+	});
+
+	console.log(`Thread ${id} ended`, v);
 }
 
 if (isMainThread) {
