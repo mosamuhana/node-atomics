@@ -252,4 +252,15 @@ declare class AtomicBool {
 
 declare function sleep(ms: number): void;
 
-export { AtomicBigInt64, AtomicBigUint64, AtomicBool, AtomicInt16, AtomicInt32, AtomicInt8, AtomicUint16, AtomicUint32, AtomicUint8, IBoolEditor, IEditor, Mutex, Semaphore, WaitGroup, sleep };
+declare class NotifyDone {
+    #private;
+    constructor(buffer: SharedArrayBuffer);
+    done(): Promise<void>;
+}
+declare class NotifyWait {
+    #private;
+    get buffer(): SharedArrayBuffer;
+    wait(): Promise<void>;
+}
+
+export { AtomicBigInt64, AtomicBigUint64, AtomicBool, AtomicInt16, AtomicInt32, AtomicInt8, AtomicUint16, AtomicUint32, AtomicUint8, IBoolEditor, IEditor, Mutex, NotifyDone, NotifyWait, Semaphore, WaitGroup, sleep };

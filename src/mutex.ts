@@ -1,4 +1,4 @@
-import { lock, unlock } from './utils';
+import { lock, unlock, synchronize, asynchronize } from './utils';
 
 export class Mutex {
 	static from(buffer: SharedArrayBuffer): Mutex;
@@ -48,20 +48,10 @@ export class Mutex {
   }
 
 	synchronize<T>(fn: () => T): T {
-		this.lock();
-		try {
-			return fn();
-		} finally {
-			this.unlock();
-		}
+		return synchronize<T>(this.#array, fn);
 	}
 
 	async asynchronize<T>(fn: () => Promise<T>): Promise<T> {
-		this.lock();
-		try {
-			return await fn();
-		} finally {
-			this.unlock();
-		}
+		return await asynchronize<T>(this.#array, fn);
 	}
 }

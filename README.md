@@ -16,6 +16,8 @@ synchronized across worker threads
 - Mutex
 - Semaphore
 - WaitGroup
+- NotifyWait
+- NotifyDone
 
 ## how to use
 `npm install @devteks/node-atomics --save`
@@ -34,7 +36,7 @@ All types has two methods
 - `.synchronize()`: for not async function
 - `.asynchronize()`: for async function
 
-### Using Atomic Integers
+## Using Atomic Integers
 
 ```javascript
 const { isMainThread, workerData, threadId, Worker } = require('worker_threads');
@@ -61,6 +63,8 @@ if (isMainThread) {
 ```
 
 ### Using `Mutex` with .synchronize()
+
+
 
 ```javascript
 const { isMainThread, workerData, threadId, Worker } = require('worker_threads');
@@ -154,7 +158,10 @@ if (isMainThread) {
 ```
 
 
-### Using `WaitGroup`
+---
+
+
+## Using `WaitGroup`
 
 in main.js
 
@@ -211,5 +218,79 @@ async function main() {
 
 main();
 ```
+
+
+---
+
+
+## Using `NotifyWait` and `NotifyDone`
+use `NotifyWait` in main thread and use `NotifyDone` in worker thread
+
+in `main.js`
+
+```javascript
+const { join } = require('path');
+const { Worker, MessageChannel, receiveMessageOnPort } = require('worker_threads');
+const { NotifyWait } = require('../../');
+
+const { port1, port2 } = new MessageChannel();
+const notify = new NotifyWait();
+
+const worker = new Worker(join(__dirname, '/worker.js'), {
+	workerData: { port: port2, notify: notify.buffer },
+	transferList: [ port2 ]
+});
+
+worker.on('error', error => {
+	console.error(error);
+});
+
+console.log('[MAIN] WAIT START');
+notify.wait();
+console.log('[MAIN] WAIT END');
+const { text } = receiveMessageOnPort(port1)?.message;
+console.log('[MAIN] length:', text.length);
+```
+
+in `worker.js`
+
+```javascript
+const { workerData } = require('worker_threads');
+const delay = require('timers/promises').setTimeout;
+const { NotifyDone } = require('../../');
+
+async function getText() {
+	await delay(1000,);
+	return 'hello';
+}
+
+async function main() {
+	const port = workerData.port;
+	const notify = new NotifyDone(workerData.notify);
+
+  const text = await getText();
+	console.log('[WORKER] length:', text.length);
+	await delay(1000);
+  port.postMessage({ text });
+	console.log('[WORKER] set');
+	notify.done();
+	await delay(1000);
+	console.log('END WORKER');
+}
+
+main();
+```
+
+### RESULT:
+
+```
+[MAIN] WAIT START
+[MAIN] WAIT END
+[MAIN] length: 5
+[WORKER] length: 5
+[WORKER] set
+END WORKER
+```
+
 
 ### clone the repository and run examples in the examples directory

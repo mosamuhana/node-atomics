@@ -6,3 +6,4 @@ export * from './int';
 export * from './bigint';
 export * from './bool';
 export * from './sleep';
+export * from './notify';

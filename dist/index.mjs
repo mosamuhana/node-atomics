@@ -127,22 +127,10 @@ class Mutex {
         unlock(this.#array);
     }
     synchronize(fn) {
-        this.lock();
-        try {
-            return fn();
-        }
-        finally {
-            this.unlock();
-        }
+        return synchronize(this.#array, fn);
     }
     async asynchronize(fn) {
-        this.lock();
-        try {
-            return await fn();
-        }
-        finally {
-            this.unlock();
-        }
+        return await asynchronize(this.#array, fn);
     }
 }
 
@@ -606,4 +594,35 @@ function sleep(ms) {
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
-export { AtomicBigInt64, AtomicBigUint64, AtomicBool, AtomicInt16, AtomicInt32, AtomicInt8, AtomicUint16, AtomicUint32, AtomicUint8, Mutex, Semaphore, WaitGroup, sleep };
+class NotifyDone {
+    #array;
+    #done = false;
+    constructor(buffer) {
+        if (buffer == null || !(buffer instanceof SharedArrayBuffer) || buffer.byteLength != 4) {
+            throw new Error('NotifyDone: buffer must be SharedArrayBuffer of byteLength = 4');
+        }
+        this.#array = new Int32Array(buffer);
+    }
+    async done() {
+        if (this.#done)
+            return;
+        this.#done = true;
+        Atomics.store(this.#array, 0, 1);
+        Atomics.notify(this.#array, 0);
+    }
+}
+class NotifyWait {
+    #array = new Int32Array(new SharedArrayBuffer(4));
+    #done = false;
+    get buffer() {
+        return this.#array.buffer;
+    }
+    async wait() {
+        if (this.#done)
+            return;
+        this.#done = true;
+        Atomics.wait(this.#array, 0, 0);
+    }
+}
+
+export { AtomicBigInt64, AtomicBigUint64, AtomicBool, AtomicInt16, AtomicInt32, AtomicInt8, AtomicUint16, AtomicUint32, AtomicUint8, Mutex, NotifyDone, NotifyWait, Semaphore, WaitGroup, sleep };

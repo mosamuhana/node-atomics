@@ -37,7 +37,7 @@ export default [
 				inlineSources: false,
 			}),
 			cleanup({
-				//comments: 'none',
+				comments: false,
 				sourcemap: false,
 				compactComments: true,
 				maxEmptyLines: -1,
@@ -59,6 +59,4 @@ export default [
 			banner(licensePiece),
 		],
 	}
-	/*
-	*/
 ];
