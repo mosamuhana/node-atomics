@@ -1,7 +1,7 @@
 /**
  * @devteks/node-atomics
  * Node.js Atomic thread safe tools
- * Version: 0.0.3
+ * Version: 0.0.4
  * Author: Mosa Muhana (https://github.com/mosamuhana)
  * License: MIT
  * Homepage: https://github.com/mosamuhana/node-atomics#readme
